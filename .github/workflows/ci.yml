@@ -107,8 +107,82 @@ jobs:
         git pull --rebase
         git push
 
+  monoruby:
+    # monoruby is a from-scratch Rust implementation, so it is built with cargo
+    # instead of ruby/setup-ruby and cannot share the matrix above.
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+    - name: Checkout monoruby
+      uses: actions/checkout@v4
+      with:
+        repository: sisshiki1969/monoruby
+        path: monoruby-src
+
+    - uses: dtolnay/rust-toolchain@nightly
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: monoruby-src
+
+    # A host CRuby (>= 4.0, matching monoruby's reported RUBY_VERSION) provides
+    # the mspec launcher and the standard library that monoruby loads at runtime.
+    - uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: "4.0"
+
+    - name: Build monoruby
+      working-directory: monoruby-src
+      run: cargo install --path monoruby --locked
+
+    - name: Clone ruby/spec and mspec
+      run: |
+        git clone --depth 1 https://github.com/ruby/spec.git spec/ruby
+        git clone --depth 1 https://github.com/ruby/mspec.git spec/mspec
+
+    - uses: actions/checkout@v4
+      with:
+        ref: master
+        path: rubyspec-stats
+        fetch-depth: 0
+
+    - run: mkdir results
+    - name: Save RUBY_VERSION
+      run: monoruby -e 'puts RUBY_VERSION' > results/RUBY_VERSION
+
+    # monoruby may segfault or hang on individual specs, which would abort a
+    # single whole-category mspec process. run_specs.rb runs each spec file in
+    # its own mspec process under a timeout (in parallel) so a bad file only
+    # costs that file while the rest of the category is still measured.
+    # No C-API specs: monoruby has no C extension support (like JRuby).
+    - name: Run specs
+      env:
+        SPEC_TIMEOUT: "30"
+      run: |
+        for cat in language core library security command_line; do
+          ruby rubyspec-stats/run_specs.rb spec/mspec/bin/mspec monoruby "spec/ruby/$cat" "results/$cat.yml" \
+            || echo "::warning::monoruby specs for $cat did not complete"
+        done
+
+    - name: Commit and push
+      working-directory: rubyspec-stats
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        rm -rf monoruby
+        cp -R ../results monoruby
+        git add monoruby
+        git commit -m "Update monoruby spec results"
+        git pull --rebase
+        git push
+
   html:
-    needs: [specs] # comment this out to only deploy
+    needs: [specs, monoruby] # comment this out to only deploy
+    # Wait for monoruby so its results are fresh, but don't let a monoruby
+    # build/run failure block updating the site for the other implementations
+    # (it falls back to the last committed monoruby/*.yml).
+    if: ${{ always() && needs.specs.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -119,7 +193,7 @@ jobs:
         ruby-version: 3.2
 
     - run: mkdir site
-    - run: ruby analyze_per_file.rb --html ruby/*.yml truffleruby/*.yml jruby/*.yml > site/index.html
+    - run: ruby analyze_per_file.rb --html ruby/*.yml truffleruby/*.yml jruby/*.yml monoruby/*.yml > site/index.html
 
     - name: Upload artifact
       uses: actions/upload-pages-artifact@v3
