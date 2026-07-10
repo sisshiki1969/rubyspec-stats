@@ -42,6 +42,16 @@ run_file = lambda do |file, tmp|
   data = (YAML.load_file(tmp) if File.exist?(tmp) && File.size?(tmp)) rescue nil
   mutex.synchronize do
     if data
+      # mspec's `errors` counter increments for every exception, including ones
+      # that happen outside an example (spec file load failures, `before(:all)`
+      # hook failures). Each such event adds 1 to errors but 0 to examples, so
+      # errors + failures can exceed examples and drive `passing = examples -
+      # errors - failures - tagged` negative for implementations with many
+      # load-time failures (e.g. monoruby, whose stdlib coverage is partial).
+      # Treat each such extra error as one attempted example so the file's
+      # contribution to the aggregate stays consistent.
+      counted = data['failures'].to_i + data['errors'].to_i + data['tagged'].to_i
+      data['examples'] = [data['examples'].to_i, counted].max
       SUMMED.each { |k| sum[k] += data[k].to_i }
       total_time += data['time'].to_f
     else
