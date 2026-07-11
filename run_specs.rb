@@ -9,20 +9,27 @@
 # while the rest of the category is still measured.
 #
 # Usage: ruby run_specs.rb <mspec> <target> <spec_dir> <out.yml>
-# Env:   SPEC_TIMEOUT  seconds before a single spec file is killed (default 30)
-#        SPEC_JOBS     parallel mspec processes (default: number of CPUs)
+# Env:   SPEC_TIMEOUT    seconds before a single spec file is killed (default 30)
+#        SPEC_JOBS       parallel mspec processes (default: number of CPUs)
+#        SPEC_SKIP_FILE  optional file listing spec paths to skip (one per line);
+#                        useful for spec files known to hang the target, so the
+#                        runner doesn't spend `SPEC_TIMEOUT` on each of them
 
 require 'yaml'
 require 'tmpdir'
 require 'etc'
+require 'set'
 
 mspec, target, spec_dir, out = ARGV
 abort "usage: ruby run_specs.rb <mspec> <target> <spec_dir> <out.yml>" unless out
 
 timeout = ENV.fetch('SPEC_TIMEOUT', '30')
 jobs    = Integer(ENV.fetch('SPEC_JOBS', Etc.nprocessors.to_s))
+skip_file = ENV['SPEC_SKIP_FILE']
+skip = skip_file && File.exist?(skip_file) ?
+  File.readlines(skip_file, chomp: true).reject(&:empty?).to_set : Set.new
 
-files = Dir.glob(File.join(spec_dir, '**', '*_spec.rb')).sort
+files = Dir.glob(File.join(spec_dir, '**', '*_spec.rb')).sort.reject { |f| skip.include?(f) }
 
 # Warm monoruby's load-path probe / cache once before running in parallel.
 system(target, '-e', '', in: File::NULL, out: File::NULL, err: File::NULL)

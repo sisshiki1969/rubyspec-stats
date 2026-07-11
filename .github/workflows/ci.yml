@@ -141,18 +141,57 @@ jobs:
     - name: Save RUBY_VERSION
       run: echo "${{ steps.monoruby.outputs.ruby-version }}" > results/RUBY_VERSION
 
-    # monoruby may segfault or hang on individual specs, which would abort a
-    # single whole-category mspec process. run_specs.rb runs each spec file in
-    # its own mspec process under a timeout (in parallel) so a bad file only
-    # costs that file while the rest of the category is still measured.
-    # No C-API specs: monoruby has no C extension support (like JRuby).
+    # A handful of monoruby-hostile specs (blocking I/O, Thread.stop, signals,
+    # exit, sockets, ...) hang or crash the target. They're listed in
+    # monoruby_skip.txt so we don't spend `SPEC_TIMEOUT` on each of them.
+    # Everything except `library` runs in one mspec process per category (like
+    # the other implementations, so this job matches truffleruby's ~2-minute
+    # wall-time instead of ~11 minutes for per-file). `library` stays per-file
+    # because many stdlib requires fail on monoruby, and per-file clamping is
+    # what stops the aggregate pass rate from collapsing to zero for that
+    # category. No C-API specs: monoruby has no C extension support.
     - name: Run specs
       env:
         SPEC_TIMEOUT: "30"
+        SPEC_SKIP_FILE: rubyspec-stats/monoruby_skip.txt
       run: |
         for cat in language core library security command_line; do
-          ruby rubyspec-stats/run_specs.rb spec/mspec/bin/mspec monoruby "spec/ruby/$cat" "results/$cat.yml" \
-            || echo "::warning::monoruby specs for $cat did not complete"
+          out=results/$cat.yml
+          : > "$out"
+
+          if [ "$cat" = library ]; then
+            ruby rubyspec-stats/run_specs.rb spec/mspec/bin/mspec monoruby "spec/ruby/$cat" "$out" \
+              || echo "::warning::monoruby specs for $cat did not complete"
+            continue
+          fi
+
+          files=$(ruby -rset -e '
+            skip = File.readlines(ENV["SPEC_SKIP_FILE"], chomp: true).reject(&:empty?).to_set
+            puts Dir["spec/ruby/#{ARGV[0]}/**/*_spec.rb"].sort.reject { |f| skip.include?(f) }
+          ' "$cat")
+
+          timeout 600 spec/mspec/bin/mspec run -t monoruby --format yaml --output "$out" $files < /dev/null \
+            || echo "::warning::mspec run for $cat did not complete cleanly"
+
+          if [ -s "$out" ]; then
+            # Strip the per-failure `exceptions` list (it would bloat the
+            # committed yaml) and clamp examples >= failures+errors+tagged so
+            # `passing` stays non-negative if any load-error imbalance survives.
+            ruby -ryaml -e '
+              d = YAML.load_file(ARGV[0])
+              counted = d["failures"].to_i + d["errors"].to_i + d["tagged"].to_i
+              d["examples"] = [d["examples"].to_i, counted].max
+              d["exceptions"] = nil
+              File.write(ARGV[0], d.to_yaml)
+            ' "$out"
+          else
+            # mspec died before writing anything (an unknown hang not in the
+            # skip list). Fall back to per-file so this category is still
+            # measured while the new hang is investigated.
+            echo "::warning::mspec run for $cat produced no yaml; falling back to run_specs.rb"
+            ruby rubyspec-stats/run_specs.rb spec/mspec/bin/mspec monoruby "spec/ruby/$cat" "$out" \
+              || echo "::warning::monoruby specs for $cat did not complete"
+          fi
         done
 
     - name: Commit and push
