@@ -124,14 +124,19 @@ jobs:
         category: [language, core, library, security, command_line]
         # No C-API: monoruby has no C extension support (like JRuby).
     steps:
-    - id: monoruby
-      uses: sisshiki1969/monoruby@master
-
-    # A host CRuby (>= 4.0, matching monoruby's reported RUBY_VERSION) provides
-    # the mspec launcher and the standard library that monoruby loads at runtime.
+    # Install the host CRuby BEFORE monoruby so setup-monoruby's own verify
+    # step (which invokes monoruby a few times) can successfully probe the
+    # host ruby and populate `~/.monoruby/library_path` — otherwise every
+    # invocation prints "Ruby may not be installed" until the cache is
+    # written on first spec run. (>= 4.0 matches monoruby's reported
+    # RUBY_VERSION; this also runs the mspec launcher and provides the
+    # standard library that monoruby loads at runtime.)
     - uses: ruby/setup-ruby@v1
       with:
         ruby-version: "4.0"
+
+    - id: monoruby
+      uses: sisshiki1969/monoruby@master
 
     - name: Clone ruby/spec and mspec
       run: |
