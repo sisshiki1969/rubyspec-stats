@@ -108,33 +108,23 @@ jobs:
         git push
 
   monoruby:
-    # monoruby is a from-scratch Rust implementation, so it is built with cargo
-    # instead of ruby/setup-ruby and cannot share the matrix above.
+    # monoruby is a from-scratch Rust implementation. Its own `setup-monoruby`
+    # action distributes a rolling nightly binary (falling back to cargo build
+    # + cache when no prebuilt asset matches), so it can't share the matrix
+    # above but doesn't need a Rust toolchain here either.
     permissions:
       contents: write
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
-    - name: Checkout monoruby
-      uses: actions/checkout@v4
-      with:
-        repository: sisshiki1969/monoruby
-        path: monoruby-src
-
-    - uses: dtolnay/rust-toolchain@nightly
-    - uses: Swatinem/rust-cache@v2
-      with:
-        workspaces: monoruby-src
+    - id: monoruby
+      uses: sisshiki1969/monoruby@master
 
     # A host CRuby (>= 4.0, matching monoruby's reported RUBY_VERSION) provides
     # the mspec launcher and the standard library that monoruby loads at runtime.
     - uses: ruby/setup-ruby@v1
       with:
         ruby-version: "4.0"
-
-    - name: Build monoruby
-      working-directory: monoruby-src
-      run: cargo install --path monoruby --locked
 
     - name: Clone ruby/spec and mspec
       run: |
@@ -149,7 +139,7 @@ jobs:
 
     - run: mkdir results
     - name: Save RUBY_VERSION
-      run: monoruby -e 'puts RUBY_VERSION' > results/RUBY_VERSION
+      run: echo "${{ steps.monoruby.outputs.ruby-version }}" > results/RUBY_VERSION
 
     # monoruby may segfault or hang on individual specs, which would abort a
     # single whole-category mspec process. run_specs.rb runs each spec file in
