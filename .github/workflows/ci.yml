@@ -109,22 +109,34 @@ jobs:
 
   monoruby:
     # monoruby is a from-scratch Rust implementation. Its own `setup-monoruby`
-    # action distributes a rolling nightly binary (falling back to cargo build
-    # + cache when no prebuilt asset matches), so it can't share the matrix
-    # above but doesn't need a Rust toolchain here either.
+    # action distributes a rolling nightly binary, so we don't need a Rust
+    # toolchain here. One job per category (see specs matrix above) so each
+    # category's wall time shows up on its own line in the Actions UI and
+    # they run in parallel — the long ones (core, library) are the bottleneck
+    # rather than their sum.
     permissions:
       contents: write
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        category: [language, core, library, security, command_line]
+        # No C-API: monoruby has no C extension support (like JRuby).
     steps:
-    - id: monoruby
-      uses: sisshiki1969/monoruby@master
-
-    # A host CRuby (>= 4.0, matching monoruby's reported RUBY_VERSION) provides
-    # the mspec launcher and the standard library that monoruby loads at runtime.
+    # Install the host CRuby BEFORE monoruby so setup-monoruby's own verify
+    # step (which invokes monoruby a few times) can successfully probe the
+    # host ruby and populate `~/.monoruby/library_path` — otherwise every
+    # invocation prints "Ruby may not be installed" until the cache is
+    # written on first spec run. (>= 4.0 matches monoruby's reported
+    # RUBY_VERSION; this also runs the mspec launcher and provides the
+    # standard library that monoruby loads at runtime.)
     - uses: ruby/setup-ruby@v1
       with:
         ruby-version: "4.0"
+
+    - id: monoruby
+      uses: sisshiki1969/monoruby@master
 
     - name: Clone ruby/spec and mspec
       run: |
@@ -137,74 +149,87 @@ jobs:
         path: rubyspec-stats
         fetch-depth: 0
 
-    - run: mkdir results
+    # Only one leg writes RUBY_VERSION (it's the same value everywhere and
+    # concurrent per-category pushes would otherwise fight the rebase).
     - name: Save RUBY_VERSION
-      run: echo "${{ steps.monoruby.outputs.ruby-version }}" > results/RUBY_VERSION
+      if: matrix.category == 'language'
+      run: echo "${{ steps.monoruby.outputs.ruby-version }}" > rubyspec-stats/monoruby/RUBY_VERSION
 
-    # A handful of monoruby-hostile specs (blocking I/O, Thread.stop, signals,
-    # exit, sockets, ...) hang or crash the target. They're listed in
-    # monoruby_skip.txt so we don't spend `SPEC_TIMEOUT` on each of them.
-    # Everything except `library` runs in one mspec process per category (like
-    # the other implementations, so this job matches truffleruby's ~2-minute
-    # wall-time instead of ~11 minutes for per-file). `library` stays per-file
-    # because many stdlib requires fail on monoruby, and per-file clamping is
-    # what stops the aggregate pass rate from collapsing to zero for that
-    # category. No C-API specs: monoruby has no C extension support.
-    - name: Run specs
+    # core has to run per-file because monoruby doesn't kill background threads
+    # left over from spec files at process exit — a whole-category `mspec run`
+    # gets stuck in the summary phase and hits the outer timeout instead of
+    # ~1min like other implementations.
+    # library also runs per-file so its many `require` failures are clamped
+    # per-file; an aggregate-level clamp would collapse the whole category to
+    # 0% pass rate.
+    # Everything else runs in one mspec process for speed, matching what the
+    # other implementations do. monoruby_skip.txt filters the file list of
+    # specs known to hang / crash the target.
+    - name: Run ${{ matrix.category }} specs
       env:
         SPEC_TIMEOUT: "30"
         SPEC_SKIP_FILE: rubyspec-stats/monoruby_skip.txt
       run: |
-        for cat in language core library security command_line; do
-          out=results/$cat.yml
-          : > "$out"
+        cat="${{ matrix.category }}"
+        out="rubyspec-stats/monoruby/$cat.yml"
+        : > "$out"
 
-          if [ "$cat" = library ]; then
-            ruby rubyspec-stats/run_specs.rb spec/mspec/bin/mspec monoruby "spec/ruby/$cat" "$out" \
-              || echo "::warning::monoruby specs for $cat did not complete"
-            continue
-          fi
+        if [ "$cat" = core ] || [ "$cat" = library ]; then
+          ruby rubyspec-stats/run_specs.rb spec/mspec/bin/mspec monoruby "spec/ruby/$cat" "$out" \
+            || echo "::warning::monoruby specs for $cat did not complete"
+          exit 0
+        fi
 
-          files=$(ruby -rset -e '
-            skip = File.readlines(ENV["SPEC_SKIP_FILE"], chomp: true).reject(&:empty?).to_set
-            puts Dir["spec/ruby/#{ARGV[0]}/**/*_spec.rb"].sort.reject { |f| skip.include?(f) }
-          ' "$cat")
+        files=$(ruby -rset -e '
+          skip = File.readlines(ENV["SPEC_SKIP_FILE"], chomp: true).reject(&:empty?).to_set
+          puts Dir["spec/ruby/#{ARGV[0]}/**/*_spec.rb"].sort.reject { |f| skip.include?(f) }
+        ' "$cat")
 
-          timeout 600 spec/mspec/bin/mspec run -t monoruby --format yaml --output "$out" $files < /dev/null \
-            || echo "::warning::mspec run for $cat did not complete cleanly"
+        timeout 300 spec/mspec/bin/mspec run -t monoruby --format yaml --output "$out" $files < /dev/null \
+          || echo "::warning::mspec run for $cat did not complete cleanly"
 
-          if [ -s "$out" ]; then
-            # Strip the per-failure `exceptions` list (it would bloat the
-            # committed yaml) and clamp examples >= failures+errors+tagged so
-            # `passing` stays non-negative if any load-error imbalance survives.
-            ruby -ryaml -e '
-              d = YAML.load_file(ARGV[0])
-              counted = d["failures"].to_i + d["errors"].to_i + d["tagged"].to_i
-              d["examples"] = [d["examples"].to_i, counted].max
-              d["exceptions"] = nil
-              File.write(ARGV[0], d.to_yaml)
-            ' "$out"
-          else
-            # mspec died before writing anything (an unknown hang not in the
-            # skip list). Fall back to per-file so this category is still
-            # measured while the new hang is investigated.
-            echo "::warning::mspec run for $cat produced no yaml; falling back to run_specs.rb"
-            ruby rubyspec-stats/run_specs.rb spec/mspec/bin/mspec monoruby "spec/ruby/$cat" "$out" \
-              || echo "::warning::monoruby specs for $cat did not complete"
-          fi
-        done
+        if [ -s "$out" ]; then
+          # Strip the per-failure `exceptions` list (it would bloat the
+          # committed yaml) and clamp examples >= failures+errors+tagged so
+          # `passing` stays non-negative if any load-error imbalance survives.
+          ruby -ryaml -e '
+            d = YAML.load_file(ARGV[0])
+            counted = d["failures"].to_i + d["errors"].to_i + d["tagged"].to_i
+            d["examples"] = [d["examples"].to_i, counted].max
+            d["exceptions"] = nil
+            File.write(ARGV[0], d.to_yaml)
+          ' "$out"
+        else
+          # mspec died before writing anything (an unknown hang not yet in the
+          # skip list). Fall back to per-file so this category is still
+          # measured while the new hang is investigated.
+          echo "::warning::mspec run for $cat produced no yaml; falling back to run_specs.rb"
+          ruby rubyspec-stats/run_specs.rb spec/mspec/bin/mspec monoruby "spec/ruby/$cat" "$out" \
+            || echo "::warning::monoruby specs for $cat did not complete"
+        fi
 
     - name: Commit and push
       working-directory: rubyspec-stats
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        rm -rf monoruby
-        cp -R ../results monoruby
-        git add monoruby
-        git commit -m "Update monoruby spec results"
-        git pull --rebase
-        git push
+        cat="${{ matrix.category }}"
+        git add "monoruby/$cat.yml"
+        if [ "$cat" = language ]; then
+          git add monoruby/RUBY_VERSION
+        fi
+        if git diff --cached --quiet; then
+          echo "no changes to commit"
+          exit 0
+        fi
+        git commit -m "Update monoruby $cat spec results"
+        # Concurrent per-category pushes race; rebase and retry a few times.
+        for i in 1 2 3 4 5; do
+          git pull --rebase && git push && exit 0
+          sleep $((i * 2))
+        done
+        echo "failed to push after retries" >&2
+        exit 1
 
   html:
     needs: [specs, monoruby] # comment this out to only deploy
