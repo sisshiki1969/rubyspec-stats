@@ -18,13 +18,18 @@ skip_file = ENV['SPEC_SKIP_FILE']
 skip = skip_file && File.exist?(skip_file) ?
   File.readlines(skip_file, chomp: true).reject(&:empty?).to_set : Set.new
 
-files = Dir.glob(File.join(spec_dir, '**', '*_spec.rb')).sort.reject { |f| skip.include?(f) }
+all_files = Dir.glob(File.join(spec_dir, '**', '*_spec.rb')).sort
+files, skipped = all_files.partition { |f| !skip.include?(f) }
 
 # Warm the target's caches once before running in parallel.
 system(target, '-e', '', in: File::NULL, out: File::NULL, err: File::NULL)
 
 SUMMED = %w[files examples expectations failures errors tagged]
 sum = Hash.new(0)
+# Skipped files count as one failing example each (same penalty as a crash).
+sum['files']    += skipped.size
+sum['examples'] += skipped.size
+sum['errors']   += skipped.size
 total_time = 0.0
 mutex = Mutex.new
 queue = files.each_index.to_a
