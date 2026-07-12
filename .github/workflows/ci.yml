@@ -108,13 +108,8 @@ jobs:
         git push
 
   monoruby:
-    # monoruby is a from-scratch Rust implementation. Its own `setup-monoruby`
-    # action distributes a rolling nightly binary, so we don't need a Rust
-    # toolchain here. Categories are separate `run` steps (like the specs
-    # matrix above), so each category's wall time is visible per step in
-    # the Actions UI. run_category.rb picks the strategy per category:
-    # per-file for core / library, one mspec process for the rest (with
-    # monoruby_skip.txt filtering known-hanging files).
+    # Some specs hang monoruby, so core / library run per-file via
+    # run_category.rb / run_specs.rb helpers.
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -123,11 +118,6 @@ jobs:
       SPEC_TIMEOUT: "30"
       SPEC_SKIP_FILE: rubyspec-stats/monoruby_skip.txt
     steps:
-    # Install the host CRuby BEFORE monoruby so setup-monoruby's own verify
-    # step can successfully probe the host ruby and populate
-    # `~/.monoruby/library_path`. (>= 4.0 matches monoruby's reported
-    # RUBY_VERSION; this also runs the mspec launcher and provides the
-    # standard library that monoruby loads at runtime.)
     - uses: ruby/setup-ruby@v1
       with:
         ruby-version: "4.0"
@@ -146,30 +136,45 @@ jobs:
         path: rubyspec-stats
         fetch-depth: 0
 
-    - name: Save RUBY_VERSION
-      run: echo "${{ steps.monoruby.outputs.ruby-version }}" > rubyspec-stats/monoruby/RUBY_VERSION
+    - run: mkdir monoruby
 
-    # No C-API specs: monoruby has no C extension support (like JRuby).
+    - name: Save RUBY_VERSION
+      run: echo "${{ steps.monoruby.outputs.ruby-version }}" > monoruby/RUBY_VERSION
+
+    - name: Set MSPEC
+      run: |
+        echo "MSPEC=timeout 300 monoruby spec/mspec/bin/mspec-run --format yaml --output stats.yml" >> $GITHUB_ENV
+        echo "MSPEC_ISOLATED=ruby rubyspec-stats/run_category.rb" >> $GITHUB_ENV
+
     - name: language specs
+      run: $MSPEC spec/ruby/language
       continue-on-error: true
-      run: ruby rubyspec-stats/run_category.rb language
+    - run: mv stats.yml monoruby/language.yml
 
     - name: core specs
+      run: $MSPEC_ISOLATED spec/ruby/core
       continue-on-error: true
-      run: ruby rubyspec-stats/run_category.rb core
+    - run: mv stats.yml monoruby/core.yml
 
     - name: library specs
+      run: $MSPEC_ISOLATED spec/ruby/library
       continue-on-error: true
-      run: ruby rubyspec-stats/run_category.rb library
+    - run: mv stats.yml monoruby/library.yml
 
     - name: security specs
+      run: $MSPEC spec/ruby/security
       continue-on-error: true
-      run: ruby rubyspec-stats/run_category.rb security
+    - run: mv stats.yml monoruby/security.yml
 
     - name: command_line specs
+      run: $MSPEC spec/ruby/command_line
       continue-on-error: true
-      run: ruby rubyspec-stats/run_category.rb command_line
+    - run: mv stats.yml monoruby/command_line.yml
 
+    - run: rm -rf monoruby
+      working-directory: rubyspec-stats
+    - run: cp -R ../monoruby .
+      working-directory: rubyspec-stats
     - name: Commit and push
       working-directory: rubyspec-stats
       run: |
@@ -186,9 +191,6 @@ jobs:
 
   html:
     needs: [specs, monoruby] # comment this out to only deploy
-    # Wait for monoruby so its results are fresh, but don't let a monoruby
-    # build/run failure block updating the site for the other implementations
-    # (it falls back to the last committed monoruby/*.yml).
     if: ${{ always() && needs.specs.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
