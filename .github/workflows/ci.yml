@@ -171,6 +171,14 @@ jobs:
       continue-on-error: true
     - run: mv stats.yml monoruby/command_line.yml
 
+    # $MSPEC (direct mspec-run) writes the full failure text into the yaml's
+    # `exceptions:` list, bloating the committed file to tens of KB. Strip it.
+    - name: Strip yaml exceptions
+      run: |
+        for f in monoruby/*.yml; do
+          ruby -ryaml -e 'p=ARGV[0]; d=YAML.load_file(p); d["exceptions"]=nil; File.write(p, d.to_yaml)' "$f"
+        done
+
     - run: rm -rf monoruby
       working-directory: rubyspec-stats
     - run: cp -R ../monoruby .
