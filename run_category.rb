@@ -25,7 +25,11 @@ require 'set'
 
 category = ARGV[0] or abort 'usage: ruby run_category.rb <category>'
 
-MSPEC     = 'spec/mspec/bin/mspec'
+# We invoke `mspec-run` directly under monoruby (skipping the top-level
+# `mspec` dispatcher script that would otherwise start a host-Ruby launcher
+# just to exec into monoruby a moment later). This matches how truffleruby /
+# jruby drive mspec on themselves.
+MSPEC_RUN = 'spec/mspec/bin/mspec-run'
 TARGET    = 'monoruby'
 OUT       = "rubyspec-stats/monoruby/#{category}.yml"
 TMP       = "#{OUT}.tmp"
@@ -54,13 +58,13 @@ end
 def run_mspec(out, files)
   return nil if files.empty?
   File.write(out, '')
-  system('timeout', '300', MSPEC, 'run', '-t', TARGET,
+  system('timeout', '300', TARGET, MSPEC_RUN,
          '--format', 'yaml', '--output', out, *files, in: File::NULL)
   load_yaml(out)
 end
 
 def run_per_file(spec_dir, out)
-  system('ruby', RUN_SPECS, MSPEC, TARGET, spec_dir, out)
+  system('ruby', RUN_SPECS, MSPEC_RUN, TARGET, spec_dir, out)
   load_yaml(out)
 end
 
