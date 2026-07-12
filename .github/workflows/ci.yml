@@ -108,15 +108,13 @@ jobs:
         git push
 
   monoruby:
-    # Some specs hang monoruby, so core / library run per-file via
-    # run_category.rb / run_specs.rb helpers.
+    # Some spec files hang monoruby (single-OS-thread scheduling). Filter
+    # them out of the file list before mspec ci; everything else runs in one
+    # process per category, same as the specs matrix above.
     permissions:
       contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      SPEC_TIMEOUT: "30"
-      SPEC_SKIP_FILE: rubyspec-stats/monoruby_skip.txt
     steps:
     - uses: ruby/setup-ruby@v1
       with:
@@ -143,36 +141,36 @@ jobs:
 
     - name: Set MSPEC
       run: |
-        echo "MSPEC=timeout 300 monoruby spec/mspec/bin/mspec-run --format yaml --output stats.yml" >> $GITHUB_ENV
-        echo "MSPEC_ISOLATED=ruby rubyspec-stats/run_category.rb" >> $GITHUB_ENV
+        echo "MSPEC=timeout 600 spec/mspec/bin/mspec ci --target monoruby --format yaml --output stats.yml" >> $GITHUB_ENV
+        echo "SKIP=rubyspec-stats/monoruby_skip.txt" >> $GITHUB_ENV
 
     - name: language specs
-      run: $MSPEC spec/ruby/language
+      run: $MSPEC $(find spec/ruby/language -name '*_spec.rb' | grep -vFxf $SKIP)
       continue-on-error: true
     - run: mv stats.yml monoruby/language.yml
 
     - name: core specs
-      run: $MSPEC_ISOLATED spec/ruby/core
+      run: $MSPEC $(find spec/ruby/core -name '*_spec.rb' | grep -vFxf $SKIP)
       continue-on-error: true
     - run: mv stats.yml monoruby/core.yml
 
     - name: library specs
-      run: $MSPEC_ISOLATED spec/ruby/library
+      run: $MSPEC $(find spec/ruby/library -name '*_spec.rb' | grep -vFxf $SKIP)
       continue-on-error: true
     - run: mv stats.yml monoruby/library.yml
 
     - name: security specs
-      run: $MSPEC spec/ruby/security
+      run: $MSPEC $(find spec/ruby/security -name '*_spec.rb' | grep -vFxf $SKIP)
       continue-on-error: true
     - run: mv stats.yml monoruby/security.yml
 
     - name: command_line specs
-      run: $MSPEC spec/ruby/command_line
+      run: $MSPEC $(find spec/ruby/command_line -name '*_spec.rb' | grep -vFxf $SKIP)
       continue-on-error: true
     - run: mv stats.yml monoruby/command_line.yml
 
-    # $MSPEC (direct mspec-run) writes the full failure text into the yaml's
-    # `exceptions:` list, bloating the committed file to tens of KB. Strip it.
+    # mspec writes the full failure text into the yaml's `exceptions:` list —
+    # for a young impl with many failures that's tens of KB. Strip it.
     - name: Strip yaml exceptions
       run: |
         for f in monoruby/*.yml; do
