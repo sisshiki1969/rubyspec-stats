@@ -117,7 +117,7 @@ jobs:
     timeout-minutes: 30
     env:
       SPEC_TIMEOUT: "30"
-      SPEC_SKIP_FILE: rubyspec-stats/monoruby_skip.txt
+      SPEC_SKIP_FILE: monoruby-repo/spec/skip.txt
     steps:
     - uses: ruby/setup-ruby@v1
       with:
@@ -130,6 +130,13 @@ jobs:
       run: |
         git clone --depth 1 https://github.com/ruby/spec.git spec/ruby
         git clone --depth 1 https://github.com/ruby/mspec.git spec/mspec
+
+    # spec/tags and the file-level skip list are maintained in the monoruby
+    # repo so upstream doesn't need PRs for each new hanging spec.
+    - name: Clone monoruby for spec/tags and skip list
+      run: |
+        git clone --depth 1 https://github.com/sisshiki1969/monoruby.git monoruby-repo
+        [ -d monoruby-repo/spec/tags ] && cp -R monoruby-repo/spec/tags spec/tags || true
 
     - uses: actions/checkout@v6
       with:
@@ -145,7 +152,7 @@ jobs:
     - name: Set MSPEC
       run: |
         echo "MSPEC=timeout 90 spec/mspec/bin/mspec ci --target monoruby --format yaml --output stats.yml" >> $GITHUB_ENV
-        echo "SKIP=rubyspec-stats/monoruby_skip.txt" >> $GITHUB_ENV
+        echo "SKIP=monoruby-repo/spec/skip.txt" >> $GITHUB_ENV
         echo "FALLBACK=ruby rubyspec-stats/run_specs.rb spec/mspec/bin/mspec-run monoruby" >> $GITHUB_ENV
 
     - name: language specs

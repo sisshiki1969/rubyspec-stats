@@ -40,20 +40,17 @@ jobs:
     - id: monoruby
       uses: sisshiki1969/monoruby@master
 
-    - name: Clone ruby/spec and mspec
+    - name: Clone ruby/spec, mspec, and monoruby (spec/tags + skip list)
       run: |
         git clone --depth 1 https://github.com/ruby/spec.git spec/ruby
         git clone --depth 1 https://github.com/ruby/mspec.git spec/mspec
-
-    - uses: actions/checkout@v6
-      with:
-        ref: master
-        path: rubyspec-stats
+        git clone --depth 1 https://github.com/sisshiki1969/monoruby.git monoruby-repo
+        [ -d monoruby-repo/spec/tags ] && cp -R monoruby-repo/spec/tags spec/tags || true
 
     - name: Filter and run
       run: |
         FILES=$(find spec/ruby/core -name '*_spec.rb' \
-                | grep -vFxf rubyspec-stats/monoruby_skip.txt \
+                | grep -vFxf monoruby-repo/spec/skip.txt \
                 | grep -E "${{ inputs.pattern }}" \
                 | sort)
         COUNT=$(printf '%s\n' "$FILES" | grep -c . || echo 0)
