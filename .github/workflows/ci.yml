@@ -108,8 +108,6 @@ jobs:
         git push
 
   monoruby:
-    # mspec ci on the skip-list-filtered file list. The outer `timeout` kills
-    # aggregate hangs from specs not yet in the skip list.
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -127,9 +125,9 @@ jobs:
         git clone --depth 1 https://github.com/ruby/spec.git spec/ruby
         git clone --depth 1 https://github.com/ruby/mspec.git spec/mspec
 
-    # spec/tags and the file-level skip list are maintained in the monoruby
-    # repo so upstream doesn't need PRs for each new hanging spec.
-    - name: Clone monoruby for spec/tags and skip list
+    # spec/tags is maintained in the monoruby repo so upstream doesn't need
+    # PRs for each hanging/failing spec.
+    - name: Clone monoruby for spec/tags
       run: |
         git clone --depth 1 https://github.com/sisshiki1969/monoruby.git monoruby-repo
         mkdir -p spec/tags/ruby
@@ -147,9 +145,7 @@ jobs:
       run: echo "${{ steps.monoruby.outputs.ruby-version }}" > monoruby/RUBY_VERSION
 
     - name: Set MSPEC
-      run: |
-        echo "MSPEC=timeout 90 spec/mspec/bin/mspec ci --target monoruby --format yaml --output stats.yml" >> $GITHUB_ENV
-        echo "SKIP=monoruby-repo/spec/skip.txt" >> $GITHUB_ENV
+      run: echo "MSPEC=timeout 90 spec/mspec/bin/mspec ci --target monoruby --format yaml --output stats.yml" >> $GITHUB_ENV
 
     - name: language specs
       run: $MSPEC spec/ruby/language
@@ -157,12 +153,12 @@ jobs:
     - run: mv stats.yml monoruby/language.yml
 
     - name: core specs
-      run: $MSPEC $(find spec/ruby/core -name '*_spec.rb' | grep -vFxf $SKIP)
+      run: $MSPEC spec/ruby/core
       continue-on-error: true
     - run: mv stats.yml monoruby/core.yml
 
     - name: library specs
-      run: $MSPEC $(find spec/ruby/library -name '*_spec.rb' | grep -vFxf $SKIP)
+      run: $MSPEC spec/ruby/library
       continue-on-error: true
     - run: mv stats.yml monoruby/library.yml
 
