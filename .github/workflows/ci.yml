@@ -185,29 +185,6 @@ jobs:
       continue-on-error: true
     - run: mv stats.yml monoruby/command_line.yml
 
-    # Text-strip the `exceptions:` block — monoruby's YAML output occasionally
-    # emits escape sequences that CRuby's Psych can't parse, so YAML.load fails.
-    - name: Strip yaml exceptions
-      run: |
-        for f in monoruby/*.yml; do
-          ruby -e '
-            p = ARGV[0]
-            src = File.read(p)
-            if src.strip.empty?
-              File.write(p, "--- {}\n"); exit
-            end
-            out, in_exc = [], false
-            src.each_line do |line|
-              if !in_exc && line.start_with?("exceptions:")
-                in_exc = true; out << "exceptions:\n"; next
-              end
-              in_exc = false if in_exc && line =~ /\A[a-zA-Z_]+:/
-              out << line unless in_exc
-            end
-            File.write(p, out.join)
-          ' "$f"
-        done
-
     - run: rm -rf monoruby
       working-directory: rubyspec-stats
     - run: cp -R ../monoruby .
