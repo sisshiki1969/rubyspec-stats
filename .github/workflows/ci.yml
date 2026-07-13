@@ -156,9 +156,7 @@ jobs:
         echo "FALLBACK=ruby rubyspec-stats/run_specs.rb spec/mspec/bin/mspec-run monoruby" >> $GITHUB_ENV
 
     - name: language specs
-      run: |
-        $MSPEC $(find spec/ruby/language -name '*_spec.rb' | grep -vFxf $SKIP) || true
-        [ -s stats.yml ] || { echo "::warning::mspec ci for language failed; per-file fallback"; $FALLBACK spec/ruby/language stats.yml; }
+      run: $MSPEC spec/ruby/language
       continue-on-error: true
     - run: mv stats.yml monoruby/language.yml
 
@@ -177,16 +175,12 @@ jobs:
     - run: mv stats.yml monoruby/library.yml
 
     - name: security specs
-      run: |
-        $MSPEC $(find spec/ruby/security -name '*_spec.rb' | grep -vFxf $SKIP) || true
-        [ -s stats.yml ] || { echo "::warning::mspec ci for security failed; per-file fallback"; $FALLBACK spec/ruby/security stats.yml; }
+      run: $MSPEC spec/ruby/security
       continue-on-error: true
     - run: mv stats.yml monoruby/security.yml
 
     - name: command_line specs
-      run: |
-        $MSPEC $(find spec/ruby/command_line -name '*_spec.rb' | grep -vFxf $SKIP) || true
-        [ -s stats.yml ] || { echo "::warning::mspec ci for command_line failed; per-file fallback"; $FALLBACK spec/ruby/command_line stats.yml; }
+      run: $MSPEC spec/ruby/command_line
       continue-on-error: true
     - run: mv stats.yml monoruby/command_line.yml
 
