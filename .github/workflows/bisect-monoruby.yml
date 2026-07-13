@@ -23,6 +23,10 @@ on:
         description: 'Seconds before declaring HANG'
         required: true
         default: '120'
+      format:
+        description: 'mspec format (d=dots one-per-example, s=spec verbose descriptions)'
+        required: true
+        default: 'd'
 
 jobs:
   bisect:
@@ -61,7 +65,7 @@ jobs:
         echo "---"
         set +e
         timeout ${{ inputs.timeout }} spec/mspec/bin/mspec ci \
-          --target monoruby --format d $FILES
+          --target monoruby --format ${{ inputs.format }} $FILES
         RC=$?
         echo "---"
         if [ $RC -eq 124 ]; then
