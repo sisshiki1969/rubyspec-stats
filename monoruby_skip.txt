@@ -26,11 +26,13 @@ spec/ruby/core/sizedqueue/append_spec.rb
 spec/ruby/core/sizedqueue/num_waiting_spec.rb
 spec/ruby/core/sizedqueue/pop_spec.rb
 spec/ruby/core/thread/alive_spec.rb
+spec/ruby/core/thread/backtrace_spec.rb
 spec/ruby/core/thread/raise_spec.rb
 spec/ruby/core/thread/report_on_exception_spec.rb
 spec/ruby/core/thread/status_spec.rb
 spec/ruby/core/thread/stop_spec.rb
 spec/ruby/core/thread/to_s_spec.rb
+spec/ruby/core/thread/value_spec.rb
 spec/ruby/library/cgi/unescapeURIComponent_spec.rb
 spec/ruby/library/expect/expect_spec.rb
 spec/ruby/library/io-wait/wait_spec.rb
