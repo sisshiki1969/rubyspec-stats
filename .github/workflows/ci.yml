@@ -136,7 +136,8 @@ jobs:
     - name: Clone monoruby for spec/tags and skip list
       run: |
         git clone --depth 1 https://github.com/sisshiki1969/monoruby.git monoruby-repo
-        [ -d monoruby-repo/spec/tags ] && cp -R monoruby-repo/spec/tags spec/tags || true
+        mkdir -p spec/tags/ruby
+        [ -d monoruby-repo/spec/tags ] && cp -R monoruby-repo/spec/tags/. spec/tags/ruby/ || true
 
     - uses: actions/checkout@v6
       with:
