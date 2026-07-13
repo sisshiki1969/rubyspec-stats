@@ -1,12 +1,11 @@
 name: Debug argf hang
 
 on:
-  workflow_dispatch:
-    inputs:
-      timeout:
-        description: 'Seconds before declaring HANG'
-        required: true
-        default: '60'
+  push:
+    branches: [claude/monoruby-conformance-tracking-iiBoP]
+
+env:
+  TIMEOUT: "30"
 
 jobs:
   debug:
@@ -34,7 +33,7 @@ jobs:
         while IFS= read -r desc; do
           echo "---"
           echo "IT: $desc"
-          timeout ${{ inputs.timeout }} spec/mspec/bin/mspec run --target monoruby --format s --example "$desc" "$FILE"
+          timeout $TIMEOUT spec/mspec/bin/mspec run --target monoruby --format s --example "$desc" "$FILE"
           RC=$?
           if [ $RC -eq 124 ]; then echo "RESULT: HANG"; else echo "RESULT: RC=$RC"; fi
         done < its.txt
@@ -49,7 +48,7 @@ jobs:
         while IFS= read -r desc; do
           echo "---"
           echo "IT: $desc"
-          timeout ${{ inputs.timeout }} spec/mspec/bin/mspec run --target monoruby --format s --example "$desc" "$FILE"
+          timeout $TIMEOUT spec/mspec/bin/mspec run --target monoruby --format s --example "$desc" "$FILE"
           RC=$?
           if [ $RC -eq 124 ]; then echo "RESULT: HANG"; else echo "RESULT: RC=$RC"; fi
         done < its.txt
