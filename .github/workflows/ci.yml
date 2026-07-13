@@ -144,7 +144,7 @@ jobs:
 
     - name: Set MSPEC
       run: |
-        echo "MSPEC=timeout 180 spec/mspec/bin/mspec ci --target monoruby --format yaml --output stats.yml" >> $GITHUB_ENV
+        echo "MSPEC=timeout 90 spec/mspec/bin/mspec ci --target monoruby --format yaml --output stats.yml" >> $GITHUB_ENV
         echo "SKIP=rubyspec-stats/monoruby_skip.txt" >> $GITHUB_ENV
         echo "FALLBACK=ruby rubyspec-stats/run_specs.rb spec/mspec/bin/mspec-run monoruby" >> $GITHUB_ENV
 
