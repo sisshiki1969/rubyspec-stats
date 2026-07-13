@@ -1,0 +1,55 @@
+name: Debug argf hang
+
+on:
+  workflow_dispatch:
+    inputs:
+      timeout:
+        description: 'Seconds before declaring HANG'
+        required: true
+        default: '60'
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: "4.0"
+
+    - uses: sisshiki1969/monoruby@master
+
+    - name: Clone ruby/spec and mspec
+      run: |
+        git clone --depth 1 https://github.com/ruby/spec.git spec/ruby
+        git clone --depth 1 https://github.com/ruby/mspec.git spec/mspec
+
+    - name: Run read_spec.rb one it at a time
+      run: |
+        set +e
+        FILE=spec/ruby/core/argf/read_spec.rb
+        echo "=== $FILE ==="
+        # Extract every `it "…"` description
+        ruby -e 'File.read(ARGV[0]).scan(/^\s*it (?:"([^"]+)"|'"'"'([^'"'"']+)'"'"')/).flatten.compact.each { |d| puts d }' "$FILE" > its.txt
+        while IFS= read -r desc; do
+          echo "---"
+          echo "IT: $desc"
+          timeout ${{ inputs.timeout }} spec/mspec/bin/mspec run --target monoruby --format s --example "$desc" "$FILE"
+          RC=$?
+          if [ $RC -eq 124 ]; then echo "RESULT: HANG"; else echo "RESULT: RC=$RC"; fi
+        done < its.txt
+
+    - name: Run readlines_spec.rb one it at a time
+      if: always()
+      run: |
+        set +e
+        FILE=spec/ruby/core/argf/readlines_spec.rb
+        echo "=== $FILE ==="
+        ruby -e 'File.read(ARGV[0]).scan(/^\s*it (?:"([^"]+)"|'"'"'([^'"'"']+)'"'"')/).flatten.compact.each { |d| puts d }' "$FILE" > its.txt
+        while IFS= read -r desc; do
+          echo "---"
+          echo "IT: $desc"
+          timeout ${{ inputs.timeout }} spec/mspec/bin/mspec run --target monoruby --format s --example "$desc" "$FILE"
+          RC=$?
+          if [ $RC -eq 124 ]; then echo "RESULT: HANG"; else echo "RESULT: RC=$RC"; fi
+        done < its.txt
