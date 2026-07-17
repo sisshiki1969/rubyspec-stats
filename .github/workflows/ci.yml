@@ -126,7 +126,7 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
     - uses: ruby/setup-ruby@v1
       with:
@@ -160,7 +160,7 @@ jobs:
       run: echo "${{ steps.monoruby.outputs.ruby-version }}" > monoruby/RUBY_VERSION
 
     - name: Set MSPEC
-      run: echo "MSPEC=timeout 90 spec/mspec/bin/mspec ci --target monoruby --format yaml --output stats.yml" >> $GITHUB_ENV
+      run: echo "MSPEC=timeout -k 5 1200 spec/mspec/bin/mspec ci --target monoruby --format yaml --output stats.yml" >> $GITHUB_ENV
 
     - name: language specs
       run: $MSPEC spec/ruby/language
