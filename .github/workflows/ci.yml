@@ -142,14 +142,26 @@ jobs:
 
     # spec/tags is maintained in the monoruby repo so upstream doesn't need
     # PRs for each hanging/failing spec.
-    # ruby/spec's default.mspec resolves tags via `[%r(core/), 'tags/core/']`
-    # etc., i.e. `spec/ruby/core/kernel/exit_spec.rb` -> `spec/ruby/tags/core/kernel/exit_tags.txt`.
-    # Copy into spec/ruby/tags so mspec actually finds these files.
+    #
+    # Tag lookup depends on whether an mspec config file is loaded. mspec
+    # searches config[:path] = ['.', 'spec'] for `default.mspec` — in this
+    # workspace layout NEITHER exists (ruby/spec's own default.mspec sits at
+    # spec/ruby/default.mspec, which is not searched), so mspec falls back to
+    # its built-in pattern `[[%r(spec/), 'spec/tags/'], [/_spec.rb$/, '_tags.txt']]`:
+    # `spec/ruby/core/file/flock_spec.rb` -> `spec/tags/ruby/core/file/flock_tags.txt`.
+    # (Verified empirically: with tags only under spec/ruby/tags the tagged
+    # hang-specs run — core/file/flock blocked the 2026-07-17 run for the whole
+    # 1200s budget.) Copy into BOTH locations so the tags keep working even if
+    # a config file ever becomes loadable and switches the mapping to
+    # ruby/spec's `[%r(core/), 'tags/core/']` style (spec/ruby/tags/...).
     - name: Clone monoruby for spec/tags
       run: |
         git clone --depth 1 https://github.com/sisshiki1969/monoruby.git monoruby-repo
-        mkdir -p spec/ruby/tags
-        [ -d monoruby-repo/spec/tags ] && cp -R monoruby-repo/spec/tags/. spec/ruby/tags/ || true
+        mkdir -p spec/tags/ruby spec/ruby/tags
+        if [ -d monoruby-repo/spec/tags ]; then
+          cp -R monoruby-repo/spec/tags/. spec/tags/ruby/
+          cp -R monoruby-repo/spec/tags/. spec/ruby/tags/
+        fi
 
     - uses: actions/checkout@v6
       with:
