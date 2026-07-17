@@ -168,7 +168,9 @@ jobs:
     - run: mv stats.yml monoruby/language.yml
 
     - name: core specs
-      run: $MSPEC spec/ruby/core
+      # kernel/exit_spec.rb deadlocks monoruby's mspec-ci at load time and
+      # takes stats.yml down with it; exclude until fixed on the monoruby side.
+      run: $MSPEC $(find spec/ruby/core -name '*_spec.rb' -not -path '*core/kernel/exit_spec.rb')
       continue-on-error: true
     - run: mv stats.yml monoruby/core.yml
 
