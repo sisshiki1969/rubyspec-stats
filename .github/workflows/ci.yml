@@ -142,11 +142,14 @@ jobs:
 
     # spec/tags is maintained in the monoruby repo so upstream doesn't need
     # PRs for each hanging/failing spec.
+    # ruby/spec's default.mspec resolves tags via `[%r(core/), 'tags/core/']`
+    # etc., i.e. `spec/ruby/core/kernel/exit_spec.rb` -> `spec/ruby/tags/core/kernel/exit_tags.txt`.
+    # Copy into spec/ruby/tags so mspec actually finds these files.
     - name: Clone monoruby for spec/tags
       run: |
         git clone --depth 1 https://github.com/sisshiki1969/monoruby.git monoruby-repo
-        mkdir -p spec/tags/ruby
-        [ -d monoruby-repo/spec/tags ] && cp -R monoruby-repo/spec/tags/. spec/tags/ruby/ || true
+        mkdir -p spec/ruby/tags
+        [ -d monoruby-repo/spec/tags ] && cp -R monoruby-repo/spec/tags/. spec/ruby/tags/ || true
 
     - uses: actions/checkout@v6
       with:
