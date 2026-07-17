@@ -6,6 +6,13 @@ on:
   - cron: '0 7 * * *'
   workflow_dispatch:
 
+# Result-publishing jobs commit to master; two overlapping runs rewrite
+# the same stats files and their rebases conflict. Queue runs instead
+# (don't cancel: a queued run publishes fresher results).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -104,8 +111,16 @@ jobs:
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
         git add "${{ matrix.name }}"
         git commit -m "Update ${{ matrix.name }} spec results"
-        git pull --rebase
-        git push
+        # This commit regenerates this job's directory wholly, so on a
+        # race the freshest run should simply win: rebase with -X theirs
+        # (in a rebase, "theirs" is the commit being replayed — ours)
+        # instead of failing on same-line conflicts, and retry the push.
+        for i in 1 2 3 4 5; do
+          git pull --rebase -X theirs
+          git push && exit 0
+          sleep $((2 ** i))
+        done
+        exit 1
 
   monoruby:
     permissions:
@@ -211,8 +226,13 @@ jobs:
           exit 0
         fi
         git commit -m "Update monoruby spec results"
-        git pull --rebase
-        git push
+        # See the specs job: latest regeneration wins on a race.
+        for i in 1 2 3 4 5; do
+          git pull --rebase -X theirs
+          git push && exit 0
+          sleep $((2 ** i))
+        done
+        exit 1
 
   html:
     needs: [specs, monoruby] # comment this out to only deploy
