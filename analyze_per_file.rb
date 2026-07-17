@@ -12,7 +12,8 @@ processed = {}
 ARGV.each { |results_file|
   results_file =~ /^(\w+)\/(.+)\.yml$/ or raise results_file
   ruby, group = $1, $2
-  data = YAML.load_file(results_file, symbolize_names: true)
+  data = YAML.load_file(results_file, symbolize_names: true) || {}
+  KINDS.each { |kind| data[kind] ||= 0 }
   processed[ruby] ||= {}
   processed[ruby][group] = data
 }
