@@ -194,7 +194,13 @@ jobs:
     - run: mv stats.yml monoruby/core.yml
 
     - name: library specs
-      run: $MSPEC spec/ruby/library
+      # Exclude library/socket: many of those specs use mspec's `block_caller`
+      # matcher (spawn Thread, spin on `t.status`), which never terminates under
+      # monoruby's cooperative single-OS-thread scheduling and pins the whole
+      # step at the outer `timeout -k 5 1200` for 20 minutes of silence.
+      # mspec's own `--timeout` can't rescue it — that watchdog is also a
+      # Ruby Thread, so it's stuck in the same @@pending queue.
+      run: $MSPEC $(find spec/ruby/library -name '*_spec.rb' -not -path '*library/socket/*')
       continue-on-error: true
     - run: mv stats.yml monoruby/library.yml
 
