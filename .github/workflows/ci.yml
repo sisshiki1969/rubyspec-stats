@@ -174,8 +174,14 @@ jobs:
     - name: Save RUBY_VERSION
       run: echo "${{ steps.monoruby.outputs.ruby-version }}" > monoruby/RUBY_VERSION
 
+    # `--timeout 60` gives mspec a per-example ceiling so a spec that hangs
+    # (e.g. `block_caller` racing monoruby's cooperative Thread scheduling)
+    # fails loudly in seconds — with the culprit's description and backtrace
+    # in stderr — instead of eating the full outer `timeout -k 5 1200` budget
+    # in silence. The category still ends up empty when this fires; use the
+    # log to identify the it, then tag it in monoruby's spec/tags.
     - name: Set MSPEC
-      run: echo "MSPEC=timeout -k 5 1200 spec/mspec/bin/mspec ci --target monoruby --format yaml --output stats.yml" >> $GITHUB_ENV
+      run: echo "MSPEC=timeout -k 5 1200 spec/mspec/bin/mspec ci --timeout 60 --target monoruby --format yaml --output stats.yml" >> $GITHUB_ENV
 
     - name: language specs
       run: $MSPEC spec/ruby/language
