@@ -1,9 +1,1 @@
----
-exceptions:
-time: 81.092565339
-files: 2126
-examples: 22785
-expectations: 101799
-failures: 476
-errors: 492
-tagged: 3
+--- {}
