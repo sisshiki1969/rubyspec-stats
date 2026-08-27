@@ -45,9 +45,15 @@ jobs:
       with:
         ruby-version: ${{ matrix.ruby }}
 
+    # `rubyspec: "true"` also clones ruby/spec + mspec into spec/ and copies
+    # monoruby's spec/tags into the tag locations mspec resolves (the tags
+    # are maintained in the monoruby repo so this repo doesn't need PRs for
+    # each hanging/failing spec).
     - if: matrix.name == 'monoruby'
       id: monoruby
       uses: sisshiki1969/monoruby@master
+      with:
+        rubyspec: "true"
 
     - if: matrix.name != 'ruby' && matrix.name != 'monoruby'
       id: ruby_revision
@@ -66,37 +72,6 @@ jobs:
     - name: Remove file on CRuby to test the ruby in PATH
       run: rm spec/default.mspec
       if: matrix.name == 'ruby'
-
-    # No monoruby repository checkout provides the specs, so fetch them directly.
-    - name: Clone ruby/spec and mspec
-      if: matrix.name == 'monoruby'
-      run: |
-        git clone --depth 1 https://github.com/ruby/spec.git spec/ruby
-        git clone --depth 1 https://github.com/ruby/mspec.git spec/mspec
-
-    # spec/tags is maintained in the monoruby repo so upstream doesn't need
-    # PRs for each hanging/failing spec.
-    #
-    # Tag lookup depends on whether an mspec config file is loaded. mspec
-    # searches config[:path] = ['.', 'spec'] for `default.mspec` — in this
-    # workspace layout NEITHER exists (ruby/spec's own default.mspec sits at
-    # spec/ruby/default.mspec, which is not searched), so mspec falls back to
-    # its built-in pattern `[[%r(spec/), 'spec/tags/'], [/_spec.rb$/, '_tags.txt']]`:
-    # `spec/ruby/core/file/flock_spec.rb` -> `spec/tags/ruby/core/file/flock_tags.txt`.
-    # (Verified empirically: with tags only under spec/ruby/tags the tagged
-    # hang-specs run — core/file/flock blocked the 2026-07-17 run for the whole
-    # 1200s budget.) Copy into BOTH locations so the tags keep working even if
-    # a config file ever becomes loadable and switches the mapping to
-    # ruby/spec's `[%r(core/), 'tags/core/']` style (spec/ruby/tags/...).
-    - name: Clone monoruby for spec/tags
-      if: matrix.name == 'monoruby'
-      run: |
-        git clone --depth 1 https://github.com/sisshiki1969/monoruby.git monoruby-repo
-        mkdir -p spec/tags/ruby spec/ruby/tags
-        if [ -d monoruby-repo/spec/tags ]; then
-          cp -R monoruby-repo/spec/tags/. spec/tags/ruby/
-          cp -R monoruby-repo/spec/tags/. spec/ruby/tags/
-        fi
 
     - run: mkdir ${{ matrix.name }}
 
