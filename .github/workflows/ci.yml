@@ -28,7 +28,15 @@ jobs:
         - { name: ruby, ruby: ruby-4.0, repo: ruby/ruby }
         - { name: jruby, ruby: jruby-head, repo: jruby/jruby }
         - { name: truffleruby, ruby: truffleruby-head, repo: oracle/truffleruby }
+        # monoruby is not in ruby/setup-ruby: CRuby runs mspec, and the
+        # prebuilt monoruby binary (installed below) is the --target.
+        - { name: monoruby, ruby: ruby-4.0 }
     runs-on: ubuntu-latest
+    # monoruby: enough headroom for the per-category budget (below) to fire
+    # twice and still publish the surviving categories' results.
+    timeout-minutes: ${{ matrix.name == 'monoruby' && 45 || 360 }}
+    # Let the site still publish when only monoruby fails.
+    continue-on-error: ${{ matrix.name == 'monoruby' }}
     env:
       JRUBY_OPTS: "--dev" # Takes 14min instead of 21min otherwise on JRuby
       # No other implementation-specific options are allowed, we should test with no options, that is with defaults, because that is what users see.
@@ -37,10 +45,14 @@ jobs:
       with:
         ruby-version: ${{ matrix.ruby }}
 
-    - if: matrix.name != 'ruby'
+    - if: matrix.name == 'monoruby'
+      id: monoruby
+      uses: sisshiki1969/monoruby@master
+
+    - if: matrix.name != 'ruby' && matrix.name != 'monoruby'
       id: ruby_revision
       run: echo "sha=$(ruby -e 'puts RUBY_REVISION')" >> $GITHUB_OUTPUT
-    - if: matrix.name != 'ruby'
+    - if: matrix.name != 'ruby' && matrix.name != 'monoruby'
       uses: actions/checkout@v6
       with:
         repository: ${{ matrix.repo }}
@@ -55,13 +67,59 @@ jobs:
       run: rm spec/default.mspec
       if: matrix.name == 'ruby'
 
+    # No monoruby repository checkout provides the specs, so fetch them directly.
+    - name: Clone ruby/spec and mspec
+      if: matrix.name == 'monoruby'
+      run: |
+        git clone --depth 1 https://github.com/ruby/spec.git spec/ruby
+        git clone --depth 1 https://github.com/ruby/mspec.git spec/mspec
+
+    # spec/tags is maintained in the monoruby repo so upstream doesn't need
+    # PRs for each hanging/failing spec.
+    #
+    # Tag lookup depends on whether an mspec config file is loaded. mspec
+    # searches config[:path] = ['.', 'spec'] for `default.mspec` — in this
+    # workspace layout NEITHER exists (ruby/spec's own default.mspec sits at
+    # spec/ruby/default.mspec, which is not searched), so mspec falls back to
+    # its built-in pattern `[[%r(spec/), 'spec/tags/'], [/_spec.rb$/, '_tags.txt']]`:
+    # `spec/ruby/core/file/flock_spec.rb` -> `spec/tags/ruby/core/file/flock_tags.txt`.
+    # (Verified empirically: with tags only under spec/ruby/tags the tagged
+    # hang-specs run — core/file/flock blocked the 2026-07-17 run for the whole
+    # 1200s budget.) Copy into BOTH locations so the tags keep working even if
+    # a config file ever becomes loadable and switches the mapping to
+    # ruby/spec's `[%r(core/), 'tags/core/']` style (spec/ruby/tags/...).
+    - name: Clone monoruby for spec/tags
+      if: matrix.name == 'monoruby'
+      run: |
+        git clone --depth 1 https://github.com/sisshiki1969/monoruby.git monoruby-repo
+        mkdir -p spec/tags/ruby spec/ruby/tags
+        if [ -d monoruby-repo/spec/tags ]; then
+          cp -R monoruby-repo/spec/tags/. spec/tags/ruby/
+          cp -R monoruby-repo/spec/tags/. spec/ruby/tags/
+        fi
+
     - run: mkdir ${{ matrix.name }}
 
     - name: Save RUBY_VERSION
       run: ruby -e 'puts RUBY_VERSION' > ${{ matrix.name }}/RUBY_VERSION
+      if: matrix.name != 'monoruby'
+    - name: Save RUBY_VERSION
+      run: echo "${{ steps.monoruby.outputs.ruby-version }}" > monoruby/RUBY_VERSION
+      if: matrix.name == 'monoruby'
 
     - name: Set MSPEC
       run: echo "MSPEC=spec/mspec/bin/mspec ci --timeout 60 --target $(which ruby) --marker . --format yaml --output stats.yml" >> $GITHUB_ENV
+      if: matrix.name != 'monoruby'
+    # monoruby needs an outer per-category budget on top of `--timeout 60`:
+    # `--timeout 60` gives mspec a per-example ceiling so a spec that hangs
+    # (e.g. `block_caller` racing monoruby's cooperative Thread scheduling)
+    # fails loudly in seconds — with the culprit's description and backtrace
+    # in stderr — instead of eating the full outer `timeout -k 5 1200` budget
+    # in silence. The category still ends up empty when this fires; use the
+    # log to identify the it, then tag it in monoruby's spec/tags.
+    - name: Set MSPEC
+      run: echo "MSPEC=timeout -k 5 1200 spec/mspec/bin/mspec ci --timeout 60 --target monoruby --format yaml --output stats.yml" >> $GITHUB_ENV
+      if: matrix.name == 'monoruby'
 
     - name: language specs
       run: $MSPEC spec/ruby/language
@@ -91,127 +149,15 @@ jobs:
     - name: capi specs
       run: $MSPEC spec/ruby/optional/capi
       continue-on-error: true
-      if: matrix.name != 'jruby'
+      if: matrix.name != 'jruby' && matrix.name != 'monoruby'
     - run: mv stats.yml ${{ matrix.name }}/capi.yml
-      if: matrix.name != 'jruby'
-
-    - uses: actions/checkout@v6
-      with:
-        ref: master
-        path: rubyspec-stats
-        fetch-depth: 0
-    - run: rm -rf "${{ matrix.name }}"
-      working-directory: rubyspec-stats
-    - run: cp -R "../${{ matrix.name }}" .
-      working-directory: rubyspec-stats
-    - name: Commit and push
-      working-directory: rubyspec-stats
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        git add "${{ matrix.name }}"
-        git commit -m "Update ${{ matrix.name }} spec results"
-        # This commit regenerates this job's directory wholly, so on a
-        # race the freshest run should simply win: rebase with -X theirs
-        # (in a rebase, "theirs" is the commit being replayed — ours)
-        # instead of failing on same-line conflicts, and retry the push.
-        for i in 1 2 3 4 5; do
-          git pull --rebase -X theirs
-          git push && exit 0
-          sleep $((2 ** i))
-        done
-        exit 1
-
-  monoruby:
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-    - uses: ruby/setup-ruby@v1
-      with:
-        ruby-version: "4.0"
-
-    - id: monoruby
-      uses: sisshiki1969/monoruby@master
-
-    - name: Clone ruby/spec and mspec
-      run: |
-        git clone --depth 1 https://github.com/ruby/spec.git spec/ruby
-        git clone --depth 1 https://github.com/ruby/mspec.git spec/mspec
-
-    # spec/tags is maintained in the monoruby repo so upstream doesn't need
-    # PRs for each hanging/failing spec.
-    #
-    # Tag lookup depends on whether an mspec config file is loaded. mspec
-    # searches config[:path] = ['.', 'spec'] for `default.mspec` — in this
-    # workspace layout NEITHER exists (ruby/spec's own default.mspec sits at
-    # spec/ruby/default.mspec, which is not searched), so mspec falls back to
-    # its built-in pattern `[[%r(spec/), 'spec/tags/'], [/_spec.rb$/, '_tags.txt']]`:
-    # `spec/ruby/core/file/flock_spec.rb` -> `spec/tags/ruby/core/file/flock_tags.txt`.
-    # (Verified empirically: with tags only under spec/ruby/tags the tagged
-    # hang-specs run — core/file/flock blocked the 2026-07-17 run for the whole
-    # 1200s budget.) Copy into BOTH locations so the tags keep working even if
-    # a config file ever becomes loadable and switches the mapping to
-    # ruby/spec's `[%r(core/), 'tags/core/']` style (spec/ruby/tags/...).
-    - name: Clone monoruby for spec/tags
-      run: |
-        git clone --depth 1 https://github.com/sisshiki1969/monoruby.git monoruby-repo
-        mkdir -p spec/tags/ruby spec/ruby/tags
-        if [ -d monoruby-repo/spec/tags ]; then
-          cp -R monoruby-repo/spec/tags/. spec/tags/ruby/
-          cp -R monoruby-repo/spec/tags/. spec/ruby/tags/
-        fi
-
-    - uses: actions/checkout@v6
-      with:
-        ref: master
-        path: rubyspec-stats
-        fetch-depth: 0
-
-    - run: mkdir monoruby
-
-    - name: Save RUBY_VERSION
-      run: echo "${{ steps.monoruby.outputs.ruby-version }}" > monoruby/RUBY_VERSION
-
-    # `--timeout 60` gives mspec a per-example ceiling so a spec that hangs
-    # (e.g. `block_caller` racing monoruby's cooperative Thread scheduling)
-    # fails loudly in seconds — with the culprit's description and backtrace
-    # in stderr — instead of eating the full outer `timeout -k 5 1200` budget
-    # in silence. The category still ends up empty when this fires; use the
-    # log to identify the it, then tag it in monoruby's spec/tags.
-    - name: Set MSPEC
-      run: echo "MSPEC=timeout -k 5 1200 spec/mspec/bin/mspec ci --timeout 60 --target monoruby --format yaml --output stats.yml" >> $GITHUB_ENV
-
-    - name: language specs
-      run: $MSPEC spec/ruby/language
-      continue-on-error: true
-    - run: mv stats.yml monoruby/language.yml
-
-    - name: core specs
-      run: $MSPEC spec/ruby/core
-      continue-on-error: true
-    - run: mv stats.yml monoruby/core.yml
-
-    - name: library specs
-      run: $MSPEC spec/ruby/library
-      continue-on-error: true
-    - run: mv stats.yml monoruby/library.yml
-
-    - name: security specs
-      run: $MSPEC spec/ruby/security
-      continue-on-error: true
-    - run: mv stats.yml monoruby/security.yml
-
-    - name: command_line specs
-      run: $MSPEC spec/ruby/command_line
-      continue-on-error: true
-    - run: mv stats.yml monoruby/command_line.yml
+      if: matrix.name != 'jruby' && matrix.name != 'monoruby'
 
     # Text-strip the `exceptions:` block — monoruby's YAML output occasionally
     # emits escape sequences that CRuby's Psych can't parse. Also keeps the
     # committed yml files small (drops tens of KB of failure text).
     - name: Strip yaml exceptions
+      if: matrix.name == 'monoruby'
       run: |
         for f in monoruby/*.yml; do
           ruby -e '
@@ -232,22 +178,30 @@ jobs:
           ' "$f"
         done
 
-    - run: rm -rf monoruby
+    - uses: actions/checkout@v6
+      with:
+        ref: master
+        path: rubyspec-stats
+        fetch-depth: 0
+    - run: rm -rf "${{ matrix.name }}"
       working-directory: rubyspec-stats
-    - run: cp -R ../monoruby .
+    - run: cp -R "../${{ matrix.name }}" .
       working-directory: rubyspec-stats
     - name: Commit and push
       working-directory: rubyspec-stats
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        git add monoruby
+        git add "${{ matrix.name }}"
         if git diff --cached --quiet; then
           echo "no changes to commit"
           exit 0
         fi
-        git commit -m "Update monoruby spec results"
-        # See the specs job: latest regeneration wins on a race.
+        git commit -m "Update ${{ matrix.name }} spec results"
+        # This commit regenerates this job's directory wholly, so on a
+        # race the freshest run should simply win: rebase with -X theirs
+        # (in a rebase, "theirs" is the commit being replayed — ours)
+        # instead of failing on same-line conflicts, and retry the push.
         for i in 1 2 3 4 5; do
           git pull --rebase -X theirs
           git push && exit 0
@@ -256,8 +210,7 @@ jobs:
         exit 1
 
   html:
-    needs: [specs, monoruby] # comment this out to only deploy
-    if: ${{ always() && needs.specs.result == 'success' }}
+    needs: [specs] # comment this out to only deploy
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
