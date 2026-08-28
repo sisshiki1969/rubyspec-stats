@@ -6,13 +6,6 @@ on:
   - cron: '0 7 * * *'
   workflow_dispatch:
 
-# Result-publishing jobs commit to master; two overlapping runs rewrite
-# the same stats files and their rebases conflict. Queue runs instead
-# (don't cancel: a queued run publishes fresher results).
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: false
-
 permissions:
   contents: read
 
@@ -58,10 +51,6 @@ jobs:
       with:
         ruby-version: ${{ matrix.ruby }}
 
-    # `rubyspec: "true"` also clones ruby/spec + mspec into spec/ and copies
-    # monoruby's spec/tags into the tag locations mspec resolves (the tags
-    # are maintained in the monoruby repo so this repo doesn't need PRs for
-    # each hanging/failing spec).
     - if: matrix.name == 'monoruby'
       uses: sisshiki1969/monoruby@master
       with:
@@ -169,21 +158,9 @@ jobs:
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
         git add "${{ matrix.name }}"
-        if git diff --cached --quiet; then
-          echo "no changes to commit"
-          exit 0
-        fi
         git commit -m "Update ${{ matrix.name }} spec results"
-        # This commit regenerates this job's directory wholly, so on a
-        # race the freshest run should simply win: rebase with -X theirs
-        # (in a rebase, "theirs" is the commit being replayed — ours)
-        # instead of failing on same-line conflicts, and retry the push.
-        for i in 1 2 3 4 5; do
-          git pull --rebase -X theirs
-          git push && exit 0
-          sleep $((2 ** i))
-        done
-        exit 1
+        git pull --rebase
+        git push
 
   html:
     needs: [specs] # comment this out to only deploy
