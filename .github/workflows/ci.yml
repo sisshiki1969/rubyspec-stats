@@ -28,6 +28,9 @@ jobs:
           ruby: ruby-4.0
           bin: monoruby
           target: monoruby
+          # monoruby builds the C-API spec extensions against its own
+          # CRuby-compatible layer (ruby.h + libmonoruby_capi.a via RbConfig).
+          capi: true
           # Outer per-category budget on top of mspec's own `--timeout 60`:
           # the mspec timeout is a watchdog thread inside the target process,
           # and monoruby's M:1 green-thread runtime cannot fire it while a
