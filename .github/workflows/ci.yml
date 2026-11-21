@@ -162,8 +162,19 @@ jobs:
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
         git add "${{ matrix.name }}"
         git commit -m "Update ${{ matrix.name }} spec results"
-        git pull --rebase
-        git push
+        # The matrix jobs all push to master within seconds of each other,
+        # so another job's push can land between our `pull --rebase` and
+        # our `push` ("cannot lock ref ... expected ..."). Each job only
+        # touches its own directory, so the rebase never conflicts: retry.
+        for i in 1 2 3 4 5; do
+          if git pull --rebase && git push; then
+            exit 0
+          fi
+          echo "push attempt $i failed; retrying"
+          git rebase --abort 2>/dev/null || true
+          sleep $((i * 5))
+        done
+        exit 1
 
   html:
     needs: [specs] # comment this out to only deploy
